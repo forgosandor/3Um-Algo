@@ -15,6 +15,12 @@
 
 **3Um-Algo** is a sophisticated, full-stack high-frequency trading platform engineered for autonomous currency and cryptocurrency trading. It combines real-time market data ingestion, ultra-low-latency execution, AI-powered trading insights, and enterprise-grade risk management.
 
+### ⚡ Performance & Reliability Core
+> *   **Latency-First Architecture:** Fastify-alapú, non-blocking I/O struktúra.
+> *   **Shadow-Execution Engine:** 1:1 arányú virtuális tesztelés minden élő trade előtt.
+> *   **Capital Preservation Shield:** Hard-coded 3%-os drawdown limit, amely automatikusan leállítja a rendszert.
+> *   **Protobuf Serialization:** Minimalizált hálózati overhead a tőzsdei adatok feldolgozásához.
+
 ### Key Highlights
 
 - 🤖 **Autonomous Trading Engine** - Self-executing AI trader with recursive decision-making
