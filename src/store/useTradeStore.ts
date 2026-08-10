@@ -161,6 +161,64 @@ function sanitizePosition(p: Position): Position {
   };
 }
 
+// Throttled high-frequency updates using requestAnimationFrame to prevent render thrashing
+let pendingUpdates: Partial<TradeStore> = {};
+let animationFrameId: number | null = null;
+
+const queueThrottledUpdate = (updates: Partial<TradeStore>, setStore: any, getStore: any) => {
+  pendingUpdates = {
+    ...pendingUpdates,
+    ...updates
+  };
+
+  if (animationFrameId === null) {
+    animationFrameId = requestAnimationFrame(() => {
+      const activePending = { ...pendingUpdates };
+      pendingUpdates = {};
+      animationFrameId = null;
+
+      setStore(activePending);
+
+      // Evaluate AI Standby Auto-Router after updating state
+      if (getStore().isAiStandbyActive) {
+        const ob = getStore().orderBook;
+        const users = getStore().users;
+        const selectedSym = getStore().selectedSymbol;
+        const currentAsset = getStore().assets.find((a: any) => a.symbol === selectedSym);
+        if (ob && users.length > 0 && currentAsset) {
+          const imb = ob.imbalance || 0;
+          const chg = Math.abs(currentAsset.change24h || 0);
+
+          let targetId = 'user_1';
+          let reason = '';
+
+          if (chg > 3.5 || Math.abs(imb) > 0.22) {
+            targetId = 'user_3'; // Csilla Breakout
+            reason = `⚡ [AI Standby Router] LOB Imbalance (${(imb * 100).toFixed(0)}%) / Volatilitás! Csilla Breakout profil aktiválva!`;
+          } else if (Math.abs(imb) < 0.08 && chg < 1.2) {
+            targetId = 'user_4'; // Dávid Range
+            reason = `📊 [AI Standby Router] Konszolidációs sáv (Low Volatility). Dávid Range profil aktiválva!`;
+          } else if (chg > 2.0) {
+            targetId = 'user_2'; // Bence Swing Trendkövető
+            reason = `📈 [AI Standby Router] Erős iránymenti trend momentum (${chg}%). Bence Swing profil aktiválva!`;
+          } else {
+            targetId = 'user_1'; // Ádám Scalper
+            reason = `🎯 [AI Standby Router] Alacsony spread és mikro-ingadozások. Kereskedő Ádám (Scalper) profil aktiválva!`;
+          }
+
+          const currentActive = getStore().activeUser;
+          if (!currentActive || currentActive.id !== targetId) {
+            const newProfile = users.find((u: any) => u.id === targetId);
+            if (newProfile) {
+              setStore({ activeUser: newProfile, aiStandbyReason: reason });
+            }
+          }
+        }
+      }
+    });
+  }
+};
+
 export const useTradeStore = create<TradeStore>((set, get) => ({
   activeUser: null,
   users: [],
@@ -247,44 +305,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
             updates.candles = data.candles.map(sanitizeCandle);
           }
           if (Object.keys(updates).length > 0) {
-            set(updates);
-          }
-
-          // Evaluate AI Standby Auto-Router
-          if (get().isAiStandbyActive) {
-            const ob = get().orderBook;
-            const users = get().users;
-            const selectedSym = get().selectedSymbol;
-            const currentAsset = get().assets.find(a => a.symbol === selectedSym);
-            if (ob && users.length > 0 && currentAsset) {
-              const imb = ob.imbalance || 0;
-              const chg = Math.abs(currentAsset.change24h || 0);
-
-              let targetId = 'user_1';
-              let reason = '';
-
-              if (chg > 3.5 || Math.abs(imb) > 0.22) {
-                targetId = 'user_3'; // Csilla Breakout
-                reason = `⚡ [AI Standby Router] LOB Imbalance (${(imb * 100).toFixed(0)}%) / Volatilitás! Csilla Breakout profil aktiválva!`;
-              } else if (Math.abs(imb) < 0.08 && chg < 1.2) {
-                targetId = 'user_4'; // Dávid Range
-                reason = `📊 [AI Standby Router] Konszolidációs sáv (Low Volatility). Dávid Range profil aktiválva!`;
-              } else if (chg > 2.0) {
-                targetId = 'user_2'; // Bence Swing Trendkövető
-                reason = `📈 [AI Standby Router] Erős iránymenti trend momentum (${chg}%). Bence Swing profil aktiválva!`;
-              } else {
-                targetId = 'user_1'; // Ádám Scalper
-                reason = `🎯 [AI Standby Router] Alacsony spread és mikro-ingadozások. Kereskedő Ádám (Scalper) profil aktiválva!`;
-              }
-
-              const currentActive = get().activeUser;
-              if (!currentActive || currentActive.id !== targetId) {
-                const newProfile = users.find(u => u.id === targetId);
-                if (newProfile) {
-                  set({ activeUser: newProfile, aiStandbyReason: reason });
-                }
-              }
-            }
+            queueThrottledUpdate(updates, set, get);
           }
         }
 
@@ -293,7 +314,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
           if (data.orderBook) updates.orderBook = sanitizeOrderBook(data.orderBook);
           if (data.candles) updates.candles = data.candles.map(sanitizeCandle);
           if (Object.keys(updates).length > 0) {
-            set(updates);
+            queueThrottledUpdate(updates, set, get);
           }
         }
 
