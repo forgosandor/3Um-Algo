@@ -1,0 +1,6 @@
+{
+  "name": "AlgoMentor - Algoritmikus Mentor",
+  "description": "Nagysebességű In-Memory Limit Order Book kereskedési motor, valós idejű WebSocket piacadatokkal és adaptív AI Mentor (TradeWhisperer) modulokkal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
