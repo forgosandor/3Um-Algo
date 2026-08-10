@@ -1,9 +1,9 @@
 import React from 'react';
 import { useTradeStore } from '../store/useTradeStore';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
-import { Layers, Activity, TrendingUp, Shield, Zap } from 'lucide-react';
+import { Layers, Zap } from 'lucide-react';
+import { CanvasDepthChart } from './CanvasDepthChart';
 
-export const LimitOrderBookView: React.FC = () => {
+const LimitOrderBookViewComponent: React.FC = () => {
   const orderBook = useTradeStore(state => state.orderBook);
   const selectedSymbol = useTradeStore(state => state.selectedSymbol);
   const assets = useTradeStore(state => state.assets);
@@ -16,21 +16,6 @@ export const LimitOrderBookView: React.FC = () => {
       </div>
     );
   }
-
-  // Create cumulative depth chart data
-  const bidsData = [...(orderBook.bids || [])].reverse().map(b => ({
-    price: b?.price ?? 0,
-    bidCum: b?.cumulative ?? 0,
-    askCum: null
-  }));
-
-  const asksData = [...(orderBook.asks || [])].map(a => ({
-    price: a?.price ?? 0,
-    bidCum: null,
-    askCum: a?.cumulative ?? 0
-  }));
-
-  const depthChartData = [...bidsData, ...asksData];
 
   return (
     <div id="lob-depth-full-view" className="p-4 max-w-[1800px] mx-auto space-y-4 font-mono text-xs">
@@ -76,22 +61,15 @@ export const LimitOrderBookView: React.FC = () => {
             <span>Order Book Mélységi Grafikon (Depth Chart)</span>
           </div>
           <span className="text-[10px] text-slate-400">
-            Zöld: Vevői Likviditás (Bids) | Piros: Eladói Likviditás (Asks)
+            Zöld: Vevői Likviditás (Bids) | Piros: Eladói Likviditás (Asks) • Mozgass egeret a szint adatokhoz
           </span>
         </div>
 
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-            <AreaChart data={depthChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <XAxis dataKey="price" stroke="#64748b" fontSize={10} tickFormatter={v => Number(v).toFixed(asset?.decimals || 2)} />
-              <YAxis stroke="#64748b" fontSize={10} />
-              <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155' }} />
-              <Area type="stepAfter" dataKey="bidCum" stroke="#10b981" fill="#10b981" fillOpacity={0.3} name="Bid Vol" />
-              <Area type="stepBefore" dataKey="askCum" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.3} name="Ask Vol" />
-            </AreaChart>
-          </ResponsiveContainer>
+        <div className="w-full">
+          <CanvasDepthChart />
         </div>
       </div>
+
 
       {/* Full Bid vs Ask Ladder Table */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -143,3 +121,5 @@ export const LimitOrderBookView: React.FC = () => {
     </div>
   );
 };
+
+export const LimitOrderBookView = React.memo(LimitOrderBookViewComponent);

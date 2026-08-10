@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Asset, OrderBookState, Candlestick, Position, Order, TradeLog, Whisper, UserProfile, TradeSide, OrderType } from '../types';
+import { Asset, OrderBookState, Candlestick, Position, Order, TradeLog, Whisper, UserProfile, TradeSide, OrderType, RiskLimits, RiskLog } from '../types';
 
 export interface AutonomousStatus {
   isRunning: boolean;
@@ -32,11 +32,25 @@ interface TradeStore {
   aiStandbyLastExecutedTime: number;
   autonomousStatus: AutonomousStatus | null;
   soundEnabled: boolean;
-  activeTab: 'terminal' | 'orderbook' | 'whispers' | 'journal' | 'analytics' | 'profile';
+  activeTab: 'terminal' | 'orderbook' | 'whispers' | 'journal' | 'analytics' | 'profile' | 'backtest' | 'risk';
   timeframe: string;
   socket: WebSocket | null;
+  binanceConnected: boolean;
+  binanceJitter: Record<string, { currentJitterMs: number; averageJitterMs: number; totalPackets: number; lastUpdateTime: number }> | null;
+  kucoinConnected: boolean;
+  kucoinJitter: Record<string, { currentJitterMs: number; averageJitterMs: number; totalPackets: number; lastUpdateTime: number }> | null;
+  activeFeedSource: 'binance' | 'kucoin';
+  systemState: { status: 'OK' | 'WARN' | 'HALT'; latency: number } | null;
+  backtestResult: any | null;
+  backtestOptimizationGrid: any[] | null;
+  backtestRunning: boolean;
+  riskLimits: RiskLimits | null;
+  riskLogs: RiskLog[];
 
   // Actions
+  setActiveFeedSource: (source: 'binance' | 'kucoin') => void;
+  updateRiskLimits: (limits: Partial<RiskLimits>) => void;
+  clearRiskLogs: () => void;
   connectWebSocket: () => void;
   initWebSocket: () => void;
   switchUser: (userId: string) => void;
@@ -44,8 +58,17 @@ interface TradeStore {
   toggleAutonomousEngine: () => void;
   setSymbol: (symbol: string) => void;
   setTimeframe: (tf: string) => void;
-  setTab: (tab: 'terminal' | 'orderbook' | 'whispers' | 'journal' | 'analytics' | 'profile') => void;
+  setTab: (tab: 'terminal' | 'orderbook' | 'whispers' | 'journal' | 'analytics' | 'profile' | 'backtest' | 'risk') => void;
   toggleSound: () => void;
+  executeBacktest: (params: {
+    symbol: string;
+    startingBalance: number;
+    kellyFraction: number;
+    stopLossPct: number;
+    takeProfitMultiplier: number;
+    ofiThreshold: number;
+    ofiWindow: number;
+  }, regime: 'mean_reversion' | 'bull_run' | 'flash_crash' | 'high_frequency_noise') => void;
   submitOrder: (order: {
     side: TradeSide;
     type: OrderType;
@@ -242,6 +265,17 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
   activeTab: 'terminal',
   timeframe: 'M5',
   socket: null,
+  binanceConnected: false,
+  binanceJitter: null,
+  kucoinConnected: false,
+  kucoinJitter: null,
+  activeFeedSource: 'binance',
+  systemState: null,
+  backtestResult: null,
+  backtestOptimizationGrid: null,
+  backtestRunning: false,
+  riskLimits: null,
+  riskLogs: [],
 
   connectWebSocket: () => {
     const existing = get().socket;
@@ -283,7 +317,15 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
             candles: (data.candles || []).map(sanitizeCandle),
             users: usersList,
             activeUser: active,
-            tradeLogs: (data.tradeLogs || []).map(sanitizeTradeLog)
+            tradeLogs: (data.tradeLogs || []).map(sanitizeTradeLog),
+            binanceConnected: !!data.binanceConnected,
+            binanceJitter: data.binanceJitter || null,
+            kucoinConnected: !!data.kucoinConnected,
+            kucoinJitter: data.kucoinJitter || null,
+            activeFeedSource: data.activeFeedSource || 'binance',
+            systemState: data.systemState || null,
+            riskLimits: data.riskLimits || null,
+            riskLogs: data.riskLogs || []
           });
 
           // Fetch whispers for active user
@@ -298,6 +340,12 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
         else if (data.type === 'TICK_UPDATE' || data.type === 'LOB_UPDATE') {
           const updates: Partial<TradeStore> = {};
           if (data.assets) updates.assets = data.assets.map(sanitizeAsset);
+          if (data.binanceConnected !== undefined) updates.binanceConnected = !!data.binanceConnected;
+          if (data.binanceJitter) updates.binanceJitter = data.binanceJitter;
+          if (data.kucoinConnected !== undefined) updates.kucoinConnected = !!data.kucoinConnected;
+          if (data.kucoinJitter) updates.kucoinJitter = data.kucoinJitter;
+          if (data.activeFeedSource !== undefined) updates.activeFeedSource = data.activeFeedSource;
+          if (data.systemState !== undefined) updates.systemState = data.systemState;
           if ((!data.symbol || data.symbol === get().selectedSymbol) && data.orderBook) {
             updates.orderBook = sanitizeOrderBook(data.orderBook);
           }
@@ -365,6 +413,34 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
               playWhisperSound();
             }
           }
+        }
+        else if (data.type === 'BACKTEST_RESULT') {
+          set({
+            backtestResult: data.result,
+            backtestOptimizationGrid: data.optimizationGrid,
+            backtestRunning: false
+          });
+        }
+
+        else if (data.type === 'RISK_LOGS_UPDATE') {
+          set({
+            riskLogs: data.riskLogs || [],
+            riskLimits: data.riskLimits || get().riskLimits
+          });
+        }
+
+        else if (data.type === 'ORDER_REJECTED') {
+          if (data.riskLogs) {
+            set({ riskLogs: data.riskLogs });
+          }
+          if (data.latencyNs) {
+            set({ latencyMs: Number((data.latencyNs / 1000000).toFixed(3)) });
+          }
+          if (get().soundEnabled) {
+            playBuzzerSound();
+          }
+          // We can also create a nice UI toast instead of window.alert, or both
+          console.warn(`[ORDER REJECTED]: ${data.reason}`);
         }
 
         else if (data.type === 'AUTONOMOUS_TRADE_EXECUTED' || data.type === 'AUTONOMOUS_POSITION_CLOSED' || data.type === 'AUTONOMOUS_EMERGENCY_STOP') {
@@ -446,6 +522,24 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
   setTimeframe: (tf: string) => set({ timeframe: tf }),
   setTab: (tab) => set({ activeTab: tab }),
   toggleSound: () => set(state => ({ soundEnabled: !state.soundEnabled })),
+
+  setActiveFeedSource: (source: 'binance' | 'kucoin') => {
+    const ws = get().socket;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'SET_ACTIVE_FEED_SOURCE', source }));
+    }
+  },
+
+  executeBacktest: (params, regime) => {
+    const ws = get().socket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    set({ backtestRunning: true });
+    ws.send(JSON.stringify({
+      type: 'EXECUTE_BACKTEST',
+      params,
+      regime: regime || 'mean_reversion'
+    }));
+  },
 
   submitOrder: (order) => {
     const ws = get().socket;
@@ -558,6 +652,23 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
     } catch (e) {
       console.error('Seed sample data error:', e);
     }
+  },
+
+  updateRiskLimits: (limits) => {
+    const ws = get().socket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'UPDATE_RISK_LIMITS',
+      limits
+    }));
+  },
+
+  clearRiskLogs: () => {
+    const ws = get().socket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'CLEAR_RISK_LOGS'
+    }));
   }
 }));
 
@@ -592,5 +703,31 @@ function playWhisperSound() {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.25);
+  } catch (e) {}
+}
+
+function playBuzzerSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(150, ctx.currentTime);
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(152, ctx.currentTime); // minor frequency detune for rich warning feel
+    
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc1.start();
+    osc2.start();
+    osc1.stop(ctx.currentTime + 0.35);
+    osc2.stop(ctx.currentTime + 0.35);
   } catch (e) {}
 }

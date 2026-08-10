@@ -153,3 +153,27 @@ export interface ExecutionReport {
   executionTimeMs: number; // in-memory LOB match time
   timestamp: number;
 }
+
+export interface RiskLimits {
+  maxOrderValueUsd: number;
+  maxOrderQty: number;
+  priceCollarPct: number;
+  maxLeverage: number;
+  maxDailyLossPct: number;
+  rateLimitPerSecond: number;
+  washTradingPrevention: boolean;
+}
+
+export interface RiskLog {
+  id: string;
+  timestamp: number;
+  userId: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: OrderType;
+  price: number;
+  amount: number;
+  isValid: boolean;
+  reason?: string;
+  latencyNs: number;
+}

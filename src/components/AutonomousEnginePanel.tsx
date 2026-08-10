@@ -2,7 +2,7 @@ import React from 'react';
 import { useTradeStore } from '../store/useTradeStore';
 import { Cpu, ShieldAlert, Zap, Play, Square, Activity, ShieldCheck, TrendingUp, DollarSign, Layers } from 'lucide-react';
 
-export const AutonomousEnginePanel: React.FC = () => {
+const AutonomousEnginePanelComponent: React.FC = () => {
   const autonomousStatus = useTradeStore(state => state.autonomousStatus);
   const toggleAutonomousEngine = useTradeStore(state => state.toggleAutonomousEngine);
   const assets = useTradeStore(state => state.assets);
@@ -217,3 +217,5 @@ export const AutonomousEnginePanel: React.FC = () => {
     </div>
   );
 };
+
+export const AutonomousEnginePanel = React.memo(AutonomousEnginePanelComponent);

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTradeStore } from '../store/useTradeStore';
-import { Layers, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
+import { Layers } from 'lucide-react';
+import { CanvasOrderBook } from './CanvasOrderBook';
 
 export const LimitOrderBook: React.FC = () => {
   const orderBook = useTradeStore(state => state.orderBook);
@@ -16,10 +17,6 @@ export const LimitOrderBook: React.FC = () => {
     );
   }
 
-  const asks = orderBook.asks || [];
-  const bids = orderBook.bids || [];
-  const maxAskVol = Math.max(...asks.map(a => a?.amount ?? 0), 0.1);
-  const maxBidVol = Math.max(...bids.map(b => b?.amount ?? 0), 0.1);
   const imbalance = typeof orderBook.imbalance === 'number' && !isNaN(orderBook.imbalance) ? orderBook.imbalance : 0;
 
   return (
@@ -37,82 +34,9 @@ export const LimitOrderBook: React.FC = () => {
         </div>
       </div>
 
-      {/* Orderbook Column Headers */}
-      <div className="grid grid-cols-3 text-[10px] text-slate-500 uppercase pb-1 px-1 border-b border-[#1a1a1a] font-semibold">
-        <span className="text-left">Ár ({asset?.category === 'Crypto' ? 'USDT' : 'USD'})</span>
-        <span className="text-right">Méret</span>
-        <span className="text-right">Összesen</span>
-      </div>
-
-      {/* Asks (Sell Orders) - Red */}
-      <div className="flex-1 overflow-hidden flex flex-col justify-end space-y-0.5 py-1">
-        {asks.slice(0, 8).reverse().map((ask, idx) => {
-          const rawPct = (ask.amount / maxAskVol) * 100;
-          const depthPct = isNaN(rawPct) || !isFinite(rawPct) ? 0 : Math.max(0, Math.min(100, rawPct));
-          return (
-            <div
-              key={`ask-${ask.price}-${idx}`}
-              className="grid grid-cols-3 text-[11px] py-0.5 px-1 relative hover:bg-[#111111] rounded transition-colors group cursor-pointer"
-            >
-              {/* Depth Background Bar */}
-              <div
-                className="absolute right-0 top-0 bottom-0 bg-rose-950/40 border-r border-rose-500/30 transition-all"
-                style={{ width: `${depthPct}%` }}
-              />
-
-              <span className="text-rose-400 font-bold z-10 text-left">
-                {(ask.price ?? 0).toFixed(asset?.decimals || 2)}
-              </span>
-              <span className="text-slate-300 z-10 text-right">
-                {ask.amount.toFixed(4)}
-              </span>
-              <span className="text-slate-500 z-10 text-right text-[10px]">
-                {ask.total.toLocaleString()}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Mid Price / Spread Indicator */}
-      <div className="my-2 py-1.5 px-3 bg-[#050505] border border-[#1a1a1a] rounded-lg flex items-center justify-between text-xs">
-        <div className="flex items-center gap-1.5 font-extrabold text-sm text-white">
-          <span>{(orderBook.lastPrice ?? 0).toFixed(asset?.decimals || 2)}</span>
-          <Activity className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
-        </div>
-        <div className="text-[10px] text-slate-500 font-sans">
-          In-Memory Match FIFO
-        </div>
-      </div>
-
-      {/* Bids (Buy Orders) - Green */}
-      <div className="flex-1 overflow-hidden flex flex-col justify-start space-y-0.5 py-1">
-        {bids.slice(0, 8).map((bid, idx) => {
-          const rawPct = (bid.amount / maxBidVol) * 100;
-          const depthPct = isNaN(rawPct) || !isFinite(rawPct) ? 0 : Math.max(0, Math.min(100, rawPct));
-          return (
-            <div
-              key={`bid-${bid.price}-${idx}`}
-              className="grid grid-cols-3 text-[11px] py-0.5 px-1 relative hover:bg-[#111111] rounded transition-colors group cursor-pointer"
-            >
-              {/* Depth Background Bar */}
-              <div
-                className="absolute right-0 top-0 bottom-0 bg-emerald-950/40 border-r border-emerald-500/30 transition-all"
-                style={{ width: `${depthPct}%` }}
-              />
-
-              <span className="text-emerald-400 font-bold z-10 text-left">
-                {(bid.price ?? 0).toFixed(asset?.decimals || 2)}
-              </span>
-              <span className="text-slate-300 z-10 text-right">
-                {bid.amount.toFixed(4)}
-              </span>
-              <span className="text-slate-500 z-10 text-right text-[10px]">
-                {bid.total.toLocaleString()}
-              </span>
-            </div>
-          );
-        })}
+      {/* High-Performance Canvas Orderbook Ladder */}
+      <div className="flex-1 overflow-hidden min-h-[350px]">
+        <CanvasOrderBook maxRows={8} />
       </div>
 
       {/* Imbalance Meter */}
@@ -137,3 +61,4 @@ export const LimitOrderBook: React.FC = () => {
     </div>
   );
 };
+

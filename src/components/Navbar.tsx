@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTradeStore } from '../store/useTradeStore';
-import { Activity, Zap, Volume2, VolumeX, Sparkles, BookOpen, BarChart3, UserCheck, Shield, Layers, Bot, Cpu } from 'lucide-react';
+import { Activity, Zap, Volume2, VolumeX, Sparkles, BookOpen, BarChart3, UserCheck, Shield, Layers, Bot, Cpu, History } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const activeUser = useTradeStore(state => state.activeUser);
@@ -11,6 +11,12 @@ export const Navbar: React.FC = () => {
   const setSymbol = useTradeStore(state => state.setSymbol);
   const latencyMs = useTradeStore(state => state.latencyMs);
   const isConnected = useTradeStore(state => state.isConnected);
+  const binanceConnected = useTradeStore(state => state.binanceConnected);
+  const binanceJitter = useTradeStore(state => state.binanceJitter);
+  const kucoinConnected = useTradeStore(state => state.kucoinConnected);
+  const kucoinJitter = useTradeStore(state => state.kucoinJitter);
+  const activeFeedSource = useTradeStore(state => state.activeFeedSource);
+  const setActiveFeedSource = useTradeStore(state => state.setActiveFeedSource);
   const soundEnabled = useTradeStore(state => state.soundEnabled);
   const toggleSound = useTradeStore(state => state.toggleSound);
   const activeTab = useTradeStore(state => state.activeTab);
@@ -26,10 +32,25 @@ export const Navbar: React.FC = () => {
   const toggleAutonomousEngine = useTradeStore(state => state.toggleAutonomousEngine);
   const isAutoRunning = autonomousStatus?.isRunning ?? false;
 
+  const systemState = useTradeStore(state => state.systemState);
+  const systemStatus = systemState?.status || 'OK';
+  const systemStatusLabel = systemStatus === 'HALT' ? 'HALT (Biztonsági Leállítás)' : systemStatus === 'WARN' ? 'WARN (Magas Késleltetés)' : 'OK (Kiváló Stabilitás)';
+  const systemStatusExplanation = systemStatus === 'HALT'
+    ? 'Hálózati jitter kritikus szinten (>500ms). A Circuit Breaker aktiválódott, az éles végrehajtás szünetel.'
+    : systemStatus === 'WARN'
+      ? 'A hálózati jitter megnőtt (>200ms). A végrehajtás folytatódik, de óvatosság ajánlott.'
+      : 'A hálózati kapcsolat stabil, a Pre-Trade Risk Engine ultra-gyors mikroszekundumos ellenőrzést biztosít.';
+
+  const navbarBorderClass = systemStatus === 'HALT'
+    ? 'border-b-2 border-rose-500/60 shadow-[0_4px_20px_rgba(239,68,68,0.15)]'
+    : systemStatus === 'WARN'
+      ? 'border-b-2 border-amber-500/60 shadow-[0_4px_20px_rgba(245,158,11,0.15)]'
+      : 'border-b border-[#1a1a1a]';
+
   const currentAsset = assets.find(a => a.symbol === selectedSymbol) || assets[0];
 
   return (
-    <header id="main-navbar" className="bg-[#0a0a0a] border-b border-[#1a1a1a] text-[#e0e0e0] sticky top-0 z-50 px-4 py-2.5 shadow-xl">
+    <header id="main-navbar" className={`bg-[#0a0a0a] text-[#e0e0e0] sticky top-0 z-50 px-4 py-2.5 transition-all duration-300 ${navbarBorderClass}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 max-w-[1800px] mx-auto">
         
         {/* Brand & Logo */}
@@ -53,16 +74,104 @@ export const Navbar: React.FC = () => {
         </div>
 
         {/* Live Latency & Execution Engine Badge */}
-        <div className="flex items-center gap-2 bg-[#050505] border border-[#1a1a1a] px-3 py-1.5 rounded-md text-xs font-mono">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-ping' : 'bg-rose-500'}`} />
-          <span className="text-slate-500">WebSocket:</span>
-          <span className={isConnected ? 'text-emerald-400 font-bold' : 'text-rose-400'}>
-            {isConnected ? 'LIVE' : 'OFFLINE'}
-          </span>
-          <span className="text-slate-700">|</span>
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span className="text-slate-500">LOB Match:</span>
-          <span className="text-amber-400 font-bold">{latencyMs.toFixed(2)} ms</span>
+        <div className="flex items-center gap-2.5 bg-[#050505] border border-[#1a1a1a] px-3 py-1 rounded-md text-xs font-mono">
+          <div className="flex items-center gap-1.5">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-ping' : 'bg-rose-500'}`} />
+            <span className="text-slate-500 text-[10px] hidden lg:inline">WS:</span>
+            <span className={isConnected ? 'text-emerald-400 font-bold' : 'text-rose-400'}>
+              {isConnected ? 'LIVE' : 'OFF'}
+            </span>
+          </div>
+          
+          <span className="text-slate-800">|</span>
+
+          {/* Binance Bridge Selection */}
+          <button
+            onClick={() => setActiveFeedSource('binance')}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded transition-all border ${
+              activeFeedSource === 'binance'
+                ? 'bg-blue-950/50 border-blue-500/50 text-white font-bold'
+                : 'border-transparent text-slate-400 hover:bg-[#111] hover:text-slate-200'
+            }`}
+            title="Kattints a Binance Élő Feed aktiválásához"
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${binanceConnected ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-[10px]">BINANCE</span>
+            {binanceConnected && binanceJitter && binanceJitter[selectedSymbol] && (
+              <span className="text-[10px] text-blue-300 font-extrabold ml-1 bg-blue-900/30 px-1 rounded">
+                {binanceJitter[selectedSymbol].currentJitterMs}ms
+              </span>
+            )}
+          </button>
+
+          {/* KuCoin Bridge Selection */}
+          <button
+            onClick={() => setActiveFeedSource('kucoin')}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded transition-all border ${
+              activeFeedSource === 'kucoin'
+                ? 'bg-orange-950/50 border-orange-500/50 text-white font-bold'
+                : 'border-transparent text-slate-400 hover:bg-[#111] hover:text-slate-200'
+            }`}
+            title="Kattints a KuCoin Élő Feed aktiválásához"
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${kucoinConnected ? 'bg-orange-400 animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-[10px]">KUCOIN</span>
+            {kucoinConnected && kucoinJitter && kucoinJitter[selectedSymbol] && (
+              <span className="text-[10px] text-orange-300 font-extrabold ml-1 bg-orange-900/30 px-1 rounded">
+                {kucoinJitter[selectedSymbol].currentJitterMs}ms
+              </span>
+            )}
+          </button>
+          
+          <span className="text-slate-800">|</span>
+
+          {/* Circuit Breaker Shield Guard */}
+          <div 
+            className="group relative flex items-center gap-1.5 px-2 py-1 rounded cursor-help border border-transparent hover:bg-[#111]"
+          >
+            <div className="w-2 h-2 rounded-full relative">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                systemStatus === 'HALT' ? 'bg-rose-500' : systemStatus === 'WARN' ? 'bg-amber-500' : 'bg-emerald-500'
+              }`} />
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                systemStatus === 'HALT' ? 'bg-rose-500' : systemStatus === 'WARN' ? 'bg-amber-500' : 'bg-emerald-500'
+              }`} />
+            </div>
+            <span className={`text-[10px] font-bold tracking-wider ${
+              systemStatus === 'HALT' ? 'text-rose-400' : systemStatus === 'WARN' ? 'text-amber-400' : 'text-emerald-400'
+            }`}>
+              GUARD: {systemStatus}
+            </span>
+
+            {/* Tooltip */}
+            <div className="absolute top-full right-0 mt-2 hidden group-hover:block z-50 w-72 bg-[#0e0e0e] border border-[#1d1d1d] p-3 rounded-lg shadow-2xl text-left pointer-events-none">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 font-mono">
+                Rendszer Védelmi Pajzs (Circuit Breaker)
+              </div>
+              <div className={`text-xs font-bold font-mono mb-1.5 flex items-center gap-1.5 ${
+                systemStatus === 'HALT' ? 'text-rose-400' : systemStatus === 'WARN' ? 'text-amber-400' : 'text-emerald-400'
+              }`}>
+                <span>Állapot:</span>
+                <span>{systemStatusLabel}</span>
+              </div>
+              <div className="text-[11px] text-slate-300 font-sans leading-relaxed">
+                {systemStatusExplanation}
+              </div>
+              <div className="text-[9px] text-slate-500 font-mono mt-2 pt-2 border-t border-[#1d1d1d] flex justify-between">
+                <span>Aktív Jitter:</span>
+                <span className="font-bold text-white">
+                  {systemState?.latency !== undefined ? `${systemState.latency} ms` : 'N/A'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <span className="text-slate-800">|</span>
+
+          <div className="flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-amber-400 font-bold">{latencyMs.toFixed(2)} ms</span>
+          </div>
         </div>
 
         {/* Symbol Selector Pill */}
@@ -220,6 +329,28 @@ export const Navbar: React.FC = () => {
           >
             <UserCheck className="w-3.5 h-3.5 text-purple-400" />
             <span>Profil & Szabályzat</span>
+          </button>
+
+          <button
+            id="nav-tab-backtest"
+            onClick={() => setTab('backtest')}
+            className={`px-3 py-1.5 rounded transition-all flex items-center gap-1.5 ${
+              activeTab === 'backtest' ? 'bg-[#1a1a1a] text-white font-bold border border-[#2a2a2a]' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 text-orange-400" />
+            <span>Visszateszt</span>
+          </button>
+
+          <button
+            id="nav-tab-risk"
+            onClick={() => setTab('risk')}
+            className={`px-3 py-1.5 rounded transition-all flex items-center gap-1.5 ${
+              activeTab === 'risk' ? 'bg-[#1a1a1a] text-white font-bold border border-[#2a2a2a]' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5 text-rose-400" />
+            <span>Kockázati Gát</span>
           </button>
         </nav>
 

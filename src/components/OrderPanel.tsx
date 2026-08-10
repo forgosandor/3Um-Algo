@@ -3,7 +3,7 @@ import { useTradeStore } from '../store/useTradeStore';
 import { TradeSide, OrderType } from '../types';
 import { ArrowUpRight, ArrowDownRight, ShieldCheck, Zap, Calculator, Crosshair, XCircle } from 'lucide-react';
 
-export const OrderPanel: React.FC = () => {
+const OrderPanelComponent: React.FC = () => {
   const activeUser = useTradeStore(state => state.activeUser);
   const selectedSymbol = useTradeStore(state => state.selectedSymbol);
   const assets = useTradeStore(state => state.assets);
@@ -311,3 +311,5 @@ export const OrderPanel: React.FC = () => {
     </div>
   );
 };
+
+export const OrderPanel = React.memo(OrderPanelComponent);

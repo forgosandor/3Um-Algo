@@ -9,6 +9,11 @@ import { DatabaseStore } from './server/database.ts';
 import { AdaptiveMentorEngine } from './server/adaptiveEngine.js';
 import { AutonomousEngine } from './server/AutonomousEngine.ts';
 import { Order, Position, TradeLog } from './src/types.js';
+import { BinanceBridge } from './server/BinanceBridge.ts';
+import { KucoinBridge } from './server/KucoinBridge.ts';
+import { BacktestingEngine } from './server/BacktestingEngine.ts';
+import { RiskEngine } from './server/RiskEngine.ts';
+import { BridgeGuard, CircuitBreakerError } from './server/BridgeManager.ts';
 
 async function startServer() {
   const app = express();
@@ -22,6 +27,7 @@ async function startServer() {
   const db = new DatabaseStore();
   const marketEngine = new MarketDataEngine();
   const mentorEngine = new AdaptiveMentorEngine();
+  const riskEngine = new RiskEngine();
 
   // In-Memory Limit Order Books
   const orderBooks = new Map<string, LimitOrderBook>();
@@ -32,6 +38,30 @@ async function startServer() {
   // Autonomous Recursive Trading Engine
   const autonomousEngine = new AutonomousEngine(orderBooks, db, 10000);
   autonomousEngine.start();
+
+  let activeFeedSource: 'binance' | 'kucoin' = 'binance';
+
+  // Real-Time Binance WebSocket Bridge
+  const binanceBridge = new BinanceBridge(
+    orderBooks,
+    marketEngine,
+    autonomousEngine,
+    broadcastLOB,
+    () => activeFeedSource === 'binance'
+  );
+  binanceBridge.connect();
+
+  // Real-Time KuCoin WebSocket Bridge
+  const kucoinBridge = new KucoinBridge(
+    orderBooks,
+    marketEngine,
+    autonomousEngine,
+    broadcastLOB,
+    () => activeFeedSource === 'kucoin'
+  );
+  kucoinBridge.connect();
+
+  const bridgeGuard = new BridgeGuard(binanceBridge, kucoinBridge);
 
   autonomousEngine.on('tradeExecuted', (data) => {
     const payload = JSON.stringify({ type: 'AUTONOMOUS_TRADE_EXECUTED', data, status: autonomousEngine.getStatus() });
@@ -71,7 +101,15 @@ async function startServer() {
       orderBook: lob ? lob.getSnapshot() : null,
       candles: marketEngine.getCandles(defaultAsset.symbol),
       users: Array.from(db.users.values()),
-      tradeLogs: db.tradeLogs.slice(0, 30)
+      tradeLogs: db.tradeLogs.slice(0, 30),
+      activeFeedSource,
+      binanceConnected: binanceBridge.getIsConnected(),
+      binanceJitter: binanceBridge.getMetricsSummary(),
+      kucoinConnected: kucoinBridge.getIsConnected(),
+      kucoinJitter: kucoinBridge.getMetricsSummary(),
+      systemState: bridgeGuard.checkHealth(activeFeedSource, defaultAsset.symbol),
+      riskLimits: riskEngine.getLimits(),
+      riskLogs: riskEngine.getRiskLogs()
     }));
 
     ws.on('message', async (rawMsg: string) => {
@@ -92,21 +130,59 @@ async function startServer() {
           }
         }
 
+        else if (data.type === 'SET_ACTIVE_FEED_SOURCE') {
+          const source = data.source;
+          if (source === 'binance' || source === 'kucoin') {
+            activeFeedSource = source;
+            console.log(`[FEED SWITCH] Active feed source switched to ${source.toUpperCase()}`);
+            const currentSym = (ws as any).subscribedSymbol || 'BTCUSDT';
+            const lob = orderBooks.get(currentSym);
+            if (lob) {
+              lob.seedInitialBook(); // Clear out stale depth data by re-seeding
+              broadcastLOB(currentSym);
+            }
+          }
+        }
+
         else if (data.type === 'SUBMIT_ORDER') {
-          const startTime = process.hrtime.bigint();
           const orderInput: Order = data.order;
-          const user = db.getUser(orderInput.userId);
+          try {
+            const startTime = process.hrtime.bigint();
+            const user = db.getUser(orderInput.userId);
 
-          if (!user) {
-            ws.send(JSON.stringify({ type: 'ORDER_REJECTED', reason: 'Felhasználó nem található' }));
-            return;
-          }
+            if (!user) {
+              ws.send(JSON.stringify({ type: 'ORDER_REJECTED', reason: 'Felhasználó nem található' }));
+              return;
+            }
 
-          const lob = orderBooks.get(orderInput.symbol);
-          if (!lob) {
-            ws.send(JSON.stringify({ type: 'ORDER_REJECTED', reason: 'Érvénytelen eszköz' }));
-            return;
-          }
+            const lob = orderBooks.get(orderInput.symbol);
+            if (!lob) {
+              ws.send(JSON.stringify({ type: 'ORDER_REJECTED', reason: 'Érvénytelen eszköz' }));
+              return;
+            }
+
+            // Circuit Breaker Proactive Guard Check
+            const systemHealth = bridgeGuard.checkHealth(activeFeedSource, orderInput.symbol);
+            if (systemHealth.status === 'HALT') {
+              throw new CircuitBreakerError(`Kritikus hálózati késleltetés (${systemHealth.latency} ms) - A Circuit Breaker leállította a végrehajtást!`);
+            }
+
+            // In-Memory Pre-Trade Risk Check (<10us latency)
+            const activeOrders = [...lob.bids, ...lob.asks];
+            const riskCheck = riskEngine.validateOrder(orderInput, lob.lastPrice, user.usdBalance, activeOrders);
+
+            if (!riskCheck.isValid) {
+              ws.send(JSON.stringify({
+                type: 'ORDER_REJECTED',
+                orderId: orderInput.id,
+                symbol: orderInput.symbol,
+                reason: riskCheck.reason,
+                latencyNs: riskCheck.latencyNs,
+                riskLogs: riskEngine.getRiskLogs()
+              }));
+              broadcastRiskLogs();
+              return;
+            }
 
           // In-Memory FIFO Matching Engine execution (<0.1ms)
           const matchResult = lob.processOrder(orderInput);
@@ -188,6 +264,21 @@ async function startServer() {
 
           // Broadcast LOB Snapshot to all clients
           broadcastLOB(orderInput.symbol);
+          } catch (err) {
+            if (err instanceof CircuitBreakerError) {
+              ws.send(JSON.stringify({
+                type: 'ORDER_REJECTED',
+                orderId: orderInput?.id,
+                symbol: orderInput?.symbol,
+                reason: err.message,
+                latencyNs: 0,
+                riskLogs: riskEngine.getRiskLogs()
+              }));
+              broadcastRiskLogs();
+            } else {
+              throw err;
+            }
+          }
         }
 
         else if (data.type === 'CLOSE_POSITION') {
@@ -227,6 +318,11 @@ async function startServer() {
             db.updateUserBalance(user.id, pnlAbs, {});
             db.positions.delete(positionId);
 
+            // Register loss in RiskEngine for pre-trade daily drawdown limit checks
+            if (!isProfitable) {
+              riskEngine.registerTradePnl(user.id, -pnlAbs);
+            }
+
             // Generate Post-Trade Whisper
             const whisper = await mentorEngine.generateWhisper(
               user,
@@ -261,6 +357,30 @@ async function startServer() {
             ws.send(JSON.stringify({ type: 'WHISPER_NEW', whisper }));
           }
         }
+
+        else if (data.type === 'UPDATE_RISK_LIMITS') {
+          riskEngine.updateLimits(data.limits);
+          broadcastRiskLogs();
+        }
+
+        else if (data.type === 'CLEAR_RISK_LOGS') {
+          riskEngine.clearRiskLogs();
+          broadcastRiskLogs();
+        }
+
+        else if (data.type === 'EXECUTE_BACKTEST') {
+          const params = data.params;
+          const regime = data.regime || 'mean_reversion';
+          const ticks = BacktestingEngine.generateSyntheticTicks(params.symbol, 5000, regime);
+          const result = BacktestingEngine.run(params, ticks);
+          const optimizationGrid = BacktestingEngine.optimize(params.symbol, params.startingBalance, params, ticks);
+
+          ws.send(JSON.stringify({
+            type: 'BACKTEST_RESULT',
+            result,
+            optimizationGrid
+          }));
+        }
       } catch (err) {
         console.error('WS Error:', err);
       }
@@ -281,7 +401,13 @@ async function startServer() {
       symbol,
       orderBook: snap,
       assets: marketEngine.assets,
-      candles: marketEngine.getCandles(symbol)
+      candles: marketEngine.getCandles(symbol),
+      activeFeedSource,
+      binanceConnected: binanceBridge.getIsConnected(),
+      binanceJitter: binanceBridge.getMetricsSummary(),
+      kucoinConnected: kucoinBridge.getIsConnected(),
+      kucoinJitter: kucoinBridge.getMetricsSummary(),
+      systemState: bridgeGuard.checkHealth(activeFeedSource, symbol)
     });
 
     for (const client of activeClients) {
@@ -291,13 +417,40 @@ async function startServer() {
     }
   }
 
-  // Real-time market tick loop (every 100ms for high speed feel)
+  function broadcastRiskLogs() {
+    const payload = JSON.stringify({
+      type: 'RISK_LOGS_UPDATE',
+      riskLogs: riskEngine.getRiskLogs(),
+      riskLimits: riskEngine.getLimits()
+    });
+    for (const client of activeClients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    }
+  }
+
+  // Real-time market tick loop (only simulate Forex now since Crypto is streamed live)
   setInterval(() => {
     for (const asset of marketEngine.assets) {
       const lob = orderBooks.get(asset.symbol);
       if (lob) {
-        // Brownian step with random market maker activity
-        const volatility = asset.price * (asset.category === 'Crypto' ? 0.0003 : 0.00005);
+        if (asset.category === 'Crypto') {
+          // Backup simulation if live feed fails (high uptime resilience)
+          if (!binanceBridge.getIsConnected() && Math.random() < 0.2) {
+            const volatility = asset.price * 0.0002;
+            const priceStep = (Math.random() - 0.495) * volatility;
+            const newPrice = Number((asset.price + priceStep).toFixed(asset.decimals));
+            lob.lastPrice = newPrice;
+            marketEngine.updatePriceTick(asset.symbol, newPrice);
+            autonomousEngine.onMarketTick(asset.symbol, newPrice, Math.random() * 5 + 0.1, Math.random() > 0.5);
+            if (Math.random() < 0.3) lob.seedInitialBook();
+          }
+          continue;
+        }
+
+        // Simulating Forex assets
+        const volatility = asset.price * 0.00005;
         const priceStep = (Math.random() - 0.495) * volatility;
         const newPrice = Number((asset.price + priceStep).toFixed(asset.decimals));
 
@@ -326,7 +479,12 @@ async function startServer() {
               symbol: sym,
               assets: marketEngine.assets,
               orderBook: lob.getSnapshot(),
-              candles: marketEngine.getCandles(sym)
+              candles: marketEngine.getCandles(sym),
+              binanceConnected: binanceBridge.getIsConnected(),
+              binanceJitter: binanceBridge.getMetricsSummary(),
+              kucoinConnected: kucoinBridge.getIsConnected(),
+              kucoinJitter: kucoinBridge.getMetricsSummary(),
+              systemState: bridgeGuard.checkHealth(activeFeedSource, sym)
             }));
           }
         }
@@ -341,6 +499,10 @@ async function startServer() {
       activeWsClients: activeClients.size,
       persistedDBWrites: db.totalPersistedWrites,
       autonomousEngine: autonomousEngine.getStatus(),
+      binance: {
+        connected: binanceBridge.getIsConnected(),
+        metrics: binanceBridge.getMetricsSummary()
+      },
       timestamp: Date.now()
     });
   });

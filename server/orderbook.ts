@@ -78,6 +78,53 @@ export class LimitOrderBook {
   }
 
   /**
+   * Injects real Binance L2 depth updates while retaining local active orders
+   */
+  public injectExternalDepth(externalBids: [string, string][], externalAsks: [string, string][]) {
+    const localBids = this.bids.filter(b => b.userId !== 'market_maker_bot' && b.userId !== 'binance_market_maker');
+    const localAsks = this.asks.filter(a => a.userId !== 'market_maker_bot' && a.userId !== 'binance_market_maker');
+
+    const binanceBids: Order[] = externalBids.map((bid, i) => {
+      const price = parseFloat(bid[0]);
+      const amount = parseFloat(bid[1]);
+      return {
+        id: `binance_bid_${i}_${Date.now()}`,
+        userId: 'binance_market_maker',
+        symbol: this.symbol,
+        side: 'BUY',
+        type: 'LIMIT',
+        price: Number(price.toFixed(this.decimals)),
+        amount,
+        filled: 0,
+        status: 'OPEN',
+        timestamp: Date.now()
+      };
+    });
+
+    const binanceAsks: Order[] = externalAsks.map((ask, i) => {
+      const price = parseFloat(ask[0]);
+      const amount = parseFloat(ask[1]);
+      return {
+        id: `binance_ask_${i}_${Date.now()}`,
+        userId: 'binance_market_maker',
+        symbol: this.symbol,
+        side: 'SELL',
+        type: 'LIMIT',
+        price: Number(price.toFixed(this.decimals)),
+        amount,
+        filled: 0,
+        status: 'OPEN',
+        timestamp: Date.now()
+      };
+    });
+
+    this.bids = [...localBids, ...binanceBids];
+    this.asks = [...localAsks, ...binanceAsks];
+
+    this.sortBook();
+  }
+
+  /**
    * Process incoming order in-memory with FIFO matching algorithm (<0.1ms latency)
    */
   public processOrder(incomingOrder: Order): MatchResult {

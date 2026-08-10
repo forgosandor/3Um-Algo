@@ -77,10 +77,53 @@ export const INITIAL_ASSETS: Asset[] = [
 
 export class MarketDataEngine {
   private candlesMap: Map<string, Candlestick[]> = new Map();
+  // Pre-allocated Float64Array buffers for zero-allocation performance (120 candles * 6 parameters each)
+  private candleBuffers: Map<string, Float64Array> = new Map();
+  private candleCounts: Map<string, number> = new Map();
   public assets: Asset[] = [...INITIAL_ASSETS];
 
   constructor() {
     this.seedCandles();
+  }
+
+  private packCandles(symbol: string, candles: Candlestick[]) {
+    let buffer = this.candleBuffers.get(symbol);
+    if (!buffer) {
+      buffer = new Float64Array(120 * 6);
+      this.candleBuffers.set(symbol, buffer);
+    }
+    const slice = candles.slice(-120);
+    this.candleCounts.set(symbol, slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      const c = slice[i];
+      const offset = i * 6;
+      buffer[offset] = c.timestamp;
+      buffer[offset + 1] = c.open;
+      buffer[offset + 2] = c.high;
+      buffer[offset + 3] = c.low;
+      buffer[offset + 4] = c.close;
+      buffer[offset + 5] = c.volume;
+    }
+  }
+
+  private unpackCandles(symbol: string): Candlestick[] {
+    const buffer = this.candleBuffers.get(symbol);
+    const count = this.candleCounts.get(symbol) || 0;
+    if (!buffer || count === 0) return [];
+    
+    const candles: Candlestick[] = [];
+    for (let i = 0; i < count; i++) {
+      const offset = i * 6;
+      candles.push({
+        timestamp: buffer[offset],
+        open: buffer[offset + 1],
+        high: buffer[offset + 2],
+        low: buffer[offset + 3],
+        close: buffer[offset + 4],
+        volume: buffer[offset + 5]
+      });
+    }
+    return candles;
   }
 
   private seedCandles() {
@@ -112,11 +155,12 @@ export class MarketDataEngine {
         basePrice = close;
       }
       this.candlesMap.set(asset.symbol, candles);
+      this.packCandles(asset.symbol, candles);
     }
   }
 
   public getCandles(symbol: string): Candlestick[] {
-    return this.candlesMap.get(symbol) || [];
+    return this.unpackCandles(symbol);
   }
 
   public updatePriceTick(symbol: string, newPrice: number) {
@@ -127,29 +171,55 @@ export class MarketDataEngine {
     asset.high24h = Math.max(asset.high24h, newPrice);
     asset.low24h = Math.min(asset.low24h, newPrice);
 
-    const candles = this.candlesMap.get(symbol) || [];
-    if (candles.length > 0) {
-      const lastCandle = candles[candles.length - 1];
-      const now = Date.now();
-
-      // If current candle is < 1 minute old, update it. Else push new candle.
-      if (now - lastCandle.timestamp < 60000) {
-        lastCandle.high = Math.max(lastCandle.high, newPrice);
-        lastCandle.low = Math.min(lastCandle.low, newPrice);
-        lastCandle.close = newPrice;
-        lastCandle.volume += Number((Math.random() * 0.5).toFixed(2));
-      } else {
-        candles.push({
-          timestamp: now,
-          open: newPrice,
-          high: newPrice,
-          low: newPrice,
-          close: newPrice,
-          volume: Number((Math.random() * 1.5 + 0.1).toFixed(2))
-        });
-        if (candles.length > 120) candles.shift();
-      }
+    let buffer = this.candleBuffers.get(symbol);
+    let count = this.candleCounts.get(symbol) || 0;
+    if (!buffer) {
+      buffer = new Float64Array(120 * 6);
+      this.candleBuffers.set(symbol, buffer);
     }
+
+    const now = Date.now();
+    if (count > 0) {
+      const lastOffset = (count - 1) * 6;
+      const lastTimestamp = buffer[lastOffset];
+
+      if (now - lastTimestamp < 60000) {
+        // High-speed, zero-allocation updates inside Float64Array
+        buffer[lastOffset + 2] = Math.max(buffer[lastOffset + 2], newPrice);
+        buffer[lastOffset + 3] = Math.min(buffer[lastOffset + 3], newPrice);
+        buffer[lastOffset + 4] = newPrice;
+        buffer[lastOffset + 5] += Number((Math.random() * 0.5).toFixed(2));
+      } else {
+        // Roll-over window logic using copyWithin to keep V8 memory clean and persistent
+        if (count >= 120) {
+          buffer.copyWithin(0, 6, 120 * 6);
+          count = 120;
+        } else {
+          count++;
+        }
+        this.candleCounts.set(symbol, count);
+        const lastOffset = (count - 1) * 6;
+        buffer[lastOffset] = now;
+        buffer[lastOffset + 1] = newPrice;
+        buffer[lastOffset + 2] = newPrice;
+        buffer[lastOffset + 3] = newPrice;
+        buffer[lastOffset + 4] = newPrice;
+        buffer[lastOffset + 5] = Number((Math.random() * 1.5 + 0.1).toFixed(2));
+      }
+    } else {
+      count = 1;
+      this.candleCounts.set(symbol, count);
+      buffer[0] = now;
+      buffer[1] = newPrice;
+      buffer[2] = newPrice;
+      buffer[3] = newPrice;
+      buffer[4] = newPrice;
+      buffer[5] = Number((Math.random() * 1.5 + 0.1).toFixed(2));
+    }
+
+    // Keep candlesMap in sync for any standard references
+    const candlesList = this.unpackCandles(symbol);
+    this.candlesMap.set(symbol, candlesList);
   }
 
   public computeIndicators(symbol: string): IndicatorValues {
