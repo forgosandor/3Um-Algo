@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useTradeStore } from '../store/useTradeStore';
 import { TradeSide, OrderType } from '../types';
-import { ArrowUpRight, ArrowDownRight, ShieldCheck, Zap, Calculator, Crosshair, XCircle } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, ShieldCheck, Zap, Calculator, Crosshair, XCircle, Cpu, Radio } from 'lucide-react';
+import { TradePanel } from './TradePanel';
 
 const OrderPanelComponent: React.FC = () => {
   const activeUser = useTradeStore(state => state.activeUser);
@@ -9,8 +10,13 @@ const OrderPanelComponent: React.FC = () => {
   const assets = useTradeStore(state => state.assets);
   const orderBook = useTradeStore(state => state.orderBook);
   const positions = useTradeStore(state => state.positions);
+  const openOrders = useTradeStore(state => state.openOrders);
+  const tradeSignals = useTradeStore(state => state.tradeSignals);
   const submitOrder = useTradeStore(state => state.submitOrder);
   const closePosition = useTradeStore(state => state.closePosition);
+  const cancelOrder = useTradeStore(state => state.cancelOrder);
+
+  const [panelTab, setPanelTab] = useState<'form' | 'signals'>('form');
 
   const asset = assets.find(a => a.symbol === selectedSymbol) || assets[0];
   const lastPrice = orderBook?.lastPrice || asset?.price || 0;
@@ -57,20 +63,57 @@ const OrderPanelComponent: React.FC = () => {
   return (
     <div className="flex flex-col gap-3 h-full">
       
-      {/* Order Submission Form */}
-      <div id="order-submission-form" className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-3.5 font-mono text-xs shadow-2xl">
-        
-        <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1a1a1a]">
-          <div className="flex items-center gap-1.5 font-bold text-white">
-            <Zap className="w-4 h-4 text-amber-400" />
-            <span>Kereskedés gomb</span>
-          </div>
-          <div className="text-[10px] text-slate-400 bg-[#050505] border border-[#1a1a1a] px-2 py-0.5 rounded font-mono">
-            Egyenleg: <span className="text-white font-bold">${activeUser?.usdBalance.toLocaleString() || 0}</span>
-          </div>
-        </div>
+      {/* Tab Switcher: Kézi Megbízás vs TradeWhisperer Jelek */}
+      <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#050505] rounded-xl border border-[#1a1a1a]">
+        <button
+          type="button"
+          id="order-panel-tab-form"
+          onClick={() => setPanelTab('form')}
+          className={`py-1.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+            panelTab === 'form'
+              ? 'bg-blue-600 text-white shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Zap className="w-3.5 h-3.5" />
+          <span>Kézi Megbízás</span>
+        </button>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <button
+          type="button"
+          id="order-panel-tab-signals"
+          onClick={() => setPanelTab('signals')}
+          className={`py-1.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all relative ${
+            panelTab === 'signals'
+              ? 'bg-purple-600 text-white shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Cpu className="w-3.5 h-3.5 text-amber-300" />
+          <span>TradeWhisperer</span>
+          {tradeSignals.length > 0 && (
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          )}
+        </button>
+      </div>
+
+      {panelTab === 'signals' ? (
+        <TradePanel />
+      ) : (
+        /* Order Submission Form */
+        <div id="order-submission-form" className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-3.5 font-mono text-xs shadow-2xl">
+          
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1a1a1a]">
+            <div className="flex items-center gap-1.5 font-bold text-white">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span>Kereskedés gomb</span>
+            </div>
+            <div className="text-[10px] text-slate-400 bg-[#050505] border border-[#1a1a1a] px-2 py-0.5 rounded font-mono">
+              Egyenleg: <span className="text-white font-bold">${activeUser?.usdBalance.toLocaleString() || 0}</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
           
           {/* Side Selector Buttons: BUY vs SELL */}
           <div className="grid grid-cols-2 gap-2">
@@ -236,76 +279,134 @@ const OrderPanelComponent: React.FC = () => {
         </form>
 
       </div>
+      )}
 
-      {/* Active Positions Table */}
-      <div id="active-positions-table" className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-3 font-mono text-xs shadow-2xl flex-1">
-        
-        <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1a1a1a]">
-          <div className="flex items-center gap-2">
-            <Crosshair className="w-4 h-4 text-blue-400" />
-            <span className="font-bold text-white">Nyitott Pozíciók ({positions.length})</span>
+      {/* Active Positions & Open Orders Container */}
+      <div className="space-y-3 flex-1">
+        {/* Active Positions Table */}
+        <div id="active-positions-table" className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-3 font-mono text-xs shadow-2xl">
+          
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1a1a1a]">
+            <div className="flex items-center gap-2">
+              <Crosshair className="w-4 h-4 text-blue-400" />
+              <span className="font-bold text-white">Nyitott Pozíciók ({positions.length})</span>
+            </div>
+            <span className="text-[10px] text-slate-500">In-Memory Execution</span>
           </div>
-          <span className="text-[10px] text-slate-500">In-Memory Execution</span>
+
+          {positions.length === 0 ? (
+            <div className="text-center py-4 text-slate-500 text-xs">
+              Nincs nyitott pozíciód.
+            </div>
+          ) : (
+            <div className="space-y-2 overflow-y-auto max-h-[180px]">
+              {positions.map((pos) => {
+                const currentAssetPrice = assets.find(a => a.symbol === pos.symbol)?.price || pos.entryPrice;
+                const priceDiff = pos.side === 'LONG' ? currentAssetPrice - pos.entryPrice : pos.entryPrice - currentAssetPrice;
+                const livePnl = priceDiff * pos.amount * pos.leverage;
+                const isProfit = livePnl >= 0;
+
+                return (
+                  <div
+                    key={pos.id}
+                    className="bg-[#050505] p-2.5 rounded-lg border border-[#1a1a1a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${pos.side === 'LONG' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' : 'bg-rose-950/80 text-rose-400 border border-rose-800/60'}`}>
+                          {pos.side} {pos.leverage}x
+                        </span>
+                        <span className="font-bold text-white">{pos.symbol}</span>
+                        <span className="text-slate-400 text-[10px]">{pos.amount} egység</span>
+                      </div>
+
+                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-3">
+                        <span>Nyitó: <strong className="text-slate-200">${pos.entryPrice}</strong></span>
+                        <span>Aktuális: <strong className="text-slate-200">${currentAssetPrice}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 self-end sm:self-center">
+                      <div className="text-right">
+                        <div className={`font-extrabold text-sm ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isProfit ? '+' : ''}${livePnl.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {pos.stopLoss ? `SL: $${pos.stopLoss}` : ''} {pos.takeProfit ? `| TP: $${pos.takeProfit}` : ''}
+                        </div>
+                      </div>
+
+                      <button
+                        id={`close-position-btn-${pos.id}`}
+                        onClick={() => closePosition(pos.id)}
+                        className="bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-[11px] px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Zárás</span>
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
         </div>
 
-        {positions.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-xs">
-            Nincs nyitott pozíciód.
+        {/* Open Limit Orders Table */}
+        <div id="open-limit-orders-table" className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-3 font-mono text-xs shadow-2xl">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1a1a1a]">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span className="font-bold text-white">Nyitott Limit Megbízások ({openOrders.length})</span>
+            </div>
+            <span className="text-[10px] text-slate-500">LOB Queue</span>
           </div>
-        ) : (
-          <div className="space-y-2 overflow-y-auto max-h-[220px]">
-            {positions.map((pos) => {
-              const currentAssetPrice = assets.find(a => a.symbol === pos.symbol)?.price || pos.entryPrice;
-              const priceDiff = pos.side === 'LONG' ? currentAssetPrice - pos.entryPrice : pos.entryPrice - currentAssetPrice;
-              const livePnl = priceDiff * pos.amount * pos.leverage;
-              const isProfit = livePnl >= 0;
 
-              return (
-                <div
-                  key={pos.id}
-                  className="bg-[#050505] p-2.5 rounded-lg border border-[#1a1a1a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${pos.side === 'LONG' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' : 'bg-rose-950/80 text-rose-400 border border-rose-800/60'}`}>
-                        {pos.side} {pos.leverage}x
-                      </span>
-                      <span className="font-bold text-white">{pos.symbol}</span>
-                      <span className="text-slate-400 text-[10px]">{pos.amount} egység</span>
-                    </div>
+          {openOrders.length === 0 ? (
+            <div className="text-center py-4 text-slate-500 text-xs">
+              Nincs várakozó limit megbízásod.
+            </div>
+          ) : (
+            <div className="space-y-2 overflow-y-auto max-h-[180px]">
+              {openOrders.map((ord) => {
+                const isBuy = ord.side === 'BUY';
 
-                    <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-3">
-                      <span>Nyitó: <strong className="text-slate-200">${pos.entryPrice}</strong></span>
-                      <span>Aktuális: <strong className="text-slate-200">${currentAssetPrice}</strong></span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 self-end sm:self-center">
-                    <div className="text-right">
-                      <div className={`font-extrabold text-sm ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isProfit ? '+' : ''}${livePnl.toFixed(2)}
+                return (
+                  <div
+                    key={ord.id}
+                    className="bg-[#050505] p-2.5 rounded-lg border border-[#1a1a1a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isBuy ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60' : 'bg-rose-950/80 text-rose-400 border border-rose-800/60'}`}>
+                          {ord.type} {ord.side}
+                        </span>
+                        <span className="font-bold text-white">{ord.symbol}</span>
+                        <span className="text-slate-400 text-[10px]">{ord.amount} egység</span>
                       </div>
-                      <div className="text-[10px] text-slate-400">
-                        {pos.stopLoss ? `SL: $${pos.stopLoss}` : ''} {pos.takeProfit ? `| TP: $${pos.takeProfit}` : ''}
+
+                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-3">
+                        <span>Limit Ár: <strong className="text-amber-300">${ord.price}</strong></span>
+                        <span>Státusz: <strong className="text-cyan-400">{ord.status}</strong></span>
                       </div>
                     </div>
 
                     <button
-                      id={`close-position-btn-${pos.id}`}
-                      onClick={() => closePosition(pos.id)}
-                      className="bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-[11px] px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 active:scale-95"
+                      id={`cancel-order-btn-${ord.id}`}
+                      onClick={() => cancelOrder(ord.id)}
+                      className="bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 font-bold text-[11px] px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 active:scale-95"
                     >
                       <XCircle className="w-3.5 h-3.5" />
-                      <span>Zárás</span>
+                      <span>Visszavonás</span>
                     </button>
                   </div>
-
-                </div>
-              );
-            })}
-          </div>
-        )}
-
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
     </div>

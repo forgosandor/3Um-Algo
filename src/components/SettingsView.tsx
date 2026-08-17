@@ -84,7 +84,7 @@ export const SettingsView: React.FC = () => {
           </p>
 
           <div className="grid grid-cols-2 gap-2 pt-1">
-            {['EUR/USD', 'BTC/USD', 'ETH/USD', 'GBP/USD', 'XRP/USD'].map(sym => (
+            {['EUR/USD', 'BTC/USD', 'ETH/USD', 'SOL/USD', 'XAU/USD (Arany)', 'XAG/USD (Ezüst)', 'GBP/USD'].map(sym => (
               <button
                 key={sym}
                 onClick={() => toggleAsset(sym)}

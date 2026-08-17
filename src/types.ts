@@ -8,7 +8,7 @@ export type WhisperType = 'PRE_TRADE' | 'IN_TRADE' | 'POST_TRADE' | 'RISK_ALERT'
 export interface Asset {
   symbol: string;
   name: string;
-  category: 'Forex' | 'Crypto';
+  category: 'Forex' | 'Crypto' | 'Commodity';
   price: number;
   change24h: number;
   high24h: number;
@@ -107,6 +107,9 @@ export interface UserProfile {
   usdBalance: number;
   btcBalance: number;
   ethBalance: number;
+  solBalance?: number;
+  xauBalance?: number;
+  xagBalance?: number;
   preferredAssets: string[];
   preferredTimeframes: string[];
   maxRiskPct: number;
@@ -177,3 +180,114 @@ export interface RiskLog {
   reason?: string;
   latencyNs: number;
 }
+
+export interface AiAnalysisResult {
+  summary: string;
+  marketRegime: string;
+  latencyDiagnosis: string;
+  riskAssessment: string;
+  recommendations: string[];
+}
+
+export interface ArbitrageOpportunity {
+  id: string;
+  timestamp: number;
+  symbol: string;
+  exchangeA: string;
+  exchangeB: string;
+  priceA: number;
+  priceB: number;
+  grossSpreadPct: number;
+  feeDeductionPct: number;
+  netProfitPct: number;
+  status: 'EXECUTED' | 'REJECTED' | 'SIMULATED';
+  reason?: string;
+}
+
+export interface PerformanceMetrics {
+  avgLatencyMs: number;
+  jitterMs: number;
+  totalExecutions: number;
+  successfulExecutions: number;
+  rejectedExecutions: number;
+  totalPnlUsd: number;
+  takerFeePct: number;
+  slippagePct: number;
+}
+
+export interface SystemConfig {
+  activeSymbol: string;
+  feedSource: string;
+  riskLimits: RiskLimits;
+  marketMakerEnabled: boolean;
+  minProfitThresholdPct: number;
+}
+
+export interface TradeSignal {
+  type: 'ARBITRAGE' | 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'VOLATILITY_ALERT' | 'RELATIVE_VALUE';
+  symbol?: string;
+  action?: 'BUY' | 'SELL';
+  confidence?: number;
+  strength?: number;
+  message: string;
+  timestamp: number;
+  metrics?: {
+    priceChange15s?: number;
+    priceChange60s?: number;
+    xauBtcRatio?: number;
+    ethBtcRatio?: number;
+    spreadPct?: number;
+  };
+}
+
+export interface PersistenceStats {
+  totalPersistedWrites: number;
+  queueDepth: number;
+  lastSnapshotTimestamp: number;
+  storageEngine: string;
+  walSizeBytes: number;
+  isRestoredFromDisk: boolean;
+}
+
+export type ExchangeProvider = 'Binance' | 'Bybit' | 'KuCoin' | 'Coinbase' | 'InteractiveBrokers' | 'OANDA' | 'CustomFIX';
+export type WalletStatus = 'CONNECTED' | 'DISCONNECTED' | 'INVALID_KEY' | 'RATE_LIMITED' | 'SYNCING';
+export type TradingMode = 'PAPER' | 'LIVE';
+
+export interface WalletMetrics {
+  totalEquityUsd: number;
+  availableUsd: number;
+  marginUsedUsd: number;
+  pnl24hUsd: number;
+  pnl24hPct: number;
+  apiLatencyMs: number;
+  volume24hUsd: number;
+  openPositionsCount: number;
+}
+
+export interface WalletConditions {
+  accountType: 'Spot' | 'Futures' | 'Margin' | 'FX Multi-Asset';
+  vipLevel: string;
+  makerFeePct: number;
+  takerFeePct: number;
+  maxLeverage: number;
+  rateLimitMaxReqPerMin: number;
+  rateLimitCurrentUsed: number;
+}
+
+export interface ExchangeWallet {
+  id: string;
+  userId: string;
+  label: string;
+  provider: ExchangeProvider;
+  environment: 'MAINNET_LIVE' | 'TESTNET_SANDBOX';
+  isLiveTradingEnabled: boolean;
+  isDefaultExecution: boolean;
+  apiKeyMasked: string;
+  subAccount?: string;
+  status: WalletStatus;
+  lastSyncTime: number;
+  metrics: WalletMetrics;
+  conditions: WalletConditions;
+  assets: { symbol: string; total: number; available: number; locked: number }[];
+}
+

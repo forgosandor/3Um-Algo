@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { Asset, Candlestick, MarketContext, MarketTrend } from '../src/types.js';
 
 export interface IndicatorValues {
@@ -72,10 +73,34 @@ export const INITIAL_ASSETS: Asset[] = [
     volume24h: 3120000.00,
     spread: 0.00015,
     decimals: 5
+  },
+  {
+    symbol: 'XAUUSD',
+    name: 'Gold / US Dollar (Arany)',
+    category: 'Commodity',
+    price: 2715.40,
+    change24h: 0.84,
+    high24h: 2732.10,
+    low24h: 2698.50,
+    volume24h: 6850000.00,
+    spread: 0.25,
+    decimals: 2
+  },
+  {
+    symbol: 'XAGUSD',
+    name: 'Silver / US Dollar (Ezüst)',
+    category: 'Commodity',
+    price: 31.85,
+    change24h: 1.62,
+    high24h: 32.40,
+    low24h: 31.20,
+    volume24h: 2450000.00,
+    spread: 0.02,
+    decimals: 3
   }
 ];
 
-export class MarketDataEngine {
+export class MarketDataEngine extends EventEmitter {
   private candlesMap: Map<string, Candlestick[]> = new Map();
   // Pre-allocated Float64Array buffers for zero-allocation performance (120 candles * 6 parameters each)
   private candleBuffers: Map<string, Float64Array> = new Map();
@@ -83,6 +108,7 @@ export class MarketDataEngine {
   public assets: Asset[] = [...INITIAL_ASSETS];
 
   constructor() {
+    super();
     this.seedCandles();
   }
 
@@ -220,6 +246,7 @@ export class MarketDataEngine {
     // Keep candlesMap in sync for any standard references
     const candlesList = this.unpackCandles(symbol);
     this.candlesMap.set(symbol, candlesList);
+    this.emit('tick', symbol, newPrice, now);
   }
 
   public computeIndicators(symbol: string): IndicatorValues {

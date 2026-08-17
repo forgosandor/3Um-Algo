@@ -139,6 +139,7 @@ export class LimitOrderBook {
       this.matchMarketOrder(incomingOrder, result);
     } else if (incomingOrder.type === 'LIMIT') {
       this.matchLimitOrder(incomingOrder, result);
+      this.sortBook();
     }
 
     const endTime = process.hrtime.bigint();
